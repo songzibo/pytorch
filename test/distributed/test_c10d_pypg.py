@@ -21,12 +21,15 @@ from torch.distributed.distributed_c10d import (
 )
 from torch.futures import Future
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+)
 
 
 def create_work(result):
@@ -474,14 +477,15 @@ class TestPyProcessGroup(TestCase):
         self.assertEqual(dist._new_window(t, group=pg), "fake-window")
         self.assertIs(pg.new_window_tensor, t)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
+    @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
     def test_block_current_stream(self) -> None:
-        torch.cuda.synchronize()
+        device_module = torch.get_device_module(device_type)
+        device_module.synchronize()
 
-        stream = torch.cuda.Stream()
+        stream = device_module.Stream()
         with stream:
             # nothing in queue so instantly resolves
-            event1 = torch.cuda.Event()
+            event1 = device_module.Event()
             event1.record()
             time.sleep(0.1)
             self.assertTrue(event1.query())
@@ -490,7 +494,7 @@ class TestPyProcessGroup(TestCase):
             work.block_current_stream()
 
             # stream is blocked so doesn't resolve
-            event = torch.cuda.Event()
+            event = device_module.Event()
             event.record()
             time.sleep(0.1)
             self.assertFalse(event.query())
@@ -501,13 +505,14 @@ class TestPyProcessGroup(TestCase):
             stream.synchronize()
             self.assertTrue(event.query())
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda/xpu")
+    @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
     def test_block_current_stream_use_after_free(self) -> None:
         """
         This tests that the CPU control tensor is not freed before the CUDA kernel executes.
         """
-        torch.cuda.synchronize()
-        stream = torch.cuda.Stream()
+        device_module = torch.get_device_module(device_type)
+        device_module.synchronize()
+        stream = device_module.Stream()
         with stream:
             a = BlockWork()
             a.block_current_stream()
@@ -521,7 +526,7 @@ class TestPyProcessGroup(TestCase):
             del b
 
             # a is still blocking so this doesn't resolve
-            event = torch.cuda.Event()
+            event = device_module.Event()
             event.record()
             time.sleep(0.1)
             self.assertFalse(event.query())

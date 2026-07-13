@@ -1,3 +1,4 @@
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/ThreadLocalState.h>
 #include <distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/cuda/StreamBlock.hpp>
@@ -141,9 +142,12 @@ bool Work::wait(std::chrono::milliseconds timeout) {
 }
 
 void Work::blockCurrentStream() {
-  // block cuda stream indefinitely until work is completed.
+  // Block the current accelerator stream indefinitely until work is completed.
+  // Falls back to CUDA when no accelerator is available (backward compat).
+  auto acc = at::accelerator::getAccelerator();
+  auto device_type = acc.value_or(c10::DeviceType::CUDA);
   std::shared_ptr<c10d::cuda::StreamBlock> handle =
-      c10d::cuda::block_stream(std::chrono::milliseconds(0));
+      c10d::cuda::block_stream(std::chrono::milliseconds(0), device_type);
 
   getFuture()->addCallback(
       [handle](c10::ivalue::Future& future) { handle->abort(); });

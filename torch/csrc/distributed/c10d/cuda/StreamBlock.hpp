@@ -3,6 +3,7 @@
 #include <chrono>
 #include <memory>
 
+#include <c10/core/DeviceType.h>
 #include <c10/util/Registry.h>
 
 namespace c10d::cuda {
@@ -15,8 +16,19 @@ enum StreamBlockStatus : int32_t {
 };
 
 /*
-StreamBlock implements a baton that will block the active CUDA stream
+StreamBlock implements a baton that will block the active stream
 until aborted by the main process.
+
+Third-party backends register their implementation via:
+  C10_REGISTER_CLASS(StreamBlockRegistry, <DeviceName>, MyStreamBlock)
+
+The constructor receives a std::chrono::milliseconds timeout.
+The implementation must:
+  - Block the current device stream in the constructor
+  - Release the block when abort() is called (may be called from any thread)
+  - Be safe to destruct without waiting if abort() has been called
+
+The backend's <DeviceName> must match c10::DeviceTypeName(device_type).
 */
 class TORCH_API StreamBlock {
  public:
@@ -25,11 +37,18 @@ class TORCH_API StreamBlock {
   virtual StreamBlockStatus status() = 0;
 };
 
+// Block the current stream of the given device type. Looks up the
+// StreamBlockRegistry using c10::DeviceTypeName(device_type) as the key.
+std::unique_ptr<StreamBlock> block_stream(
+    std::chrono::milliseconds timeout,
+    c10::DeviceType device_type);
+
+// Backward-compatible overload: defaults to CUDA.
 std::unique_ptr<StreamBlock> block_stream(std::chrono::milliseconds timeout);
 
-// Declare a registry so we can call the CUDA StreamBlock API from CPU only code
-// (i.e. ProcessGroup/Work objects in libtorch_cpu).
-// The implementation lives defined in StreamBlock.cu.
+// Registry for StreamBlock implementations. The CUDA implementation is
+// defined in StreamBlock.cu. Third-party backends register their own
+// implementation via C10_REGISTER_CLASS with their device name as the key.
 TORCH_DECLARE_REGISTRY(
     StreamBlockRegistry,
     StreamBlock,
