@@ -16,11 +16,12 @@ if not dist.is_available():
     sys.exit(0)
 
 from torch.testing._internal.common_distributed import DistributedTestBase, TEST_SKIPS
-from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 
-device_type = get_devtype().type
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+)
 
 if TEST_WITH_DEV_DBG_ASAN:
     print(
